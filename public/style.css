@@ -111,3 +111,15 @@ button,input{font:inherit}
 .loginCard{padding:28px}
 .brand{font-size:31px}
 }
+/* MOBILE / TABLET TOUCH CONTROLS */
+@media (pointer: coarse) {
+  .joystick {
+    display: block !important;
+    z-index: 20;
+  }
+
+  .fireButton {
+    display: block !important;
+    z-index: 20;
+  }
+}
