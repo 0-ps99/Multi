@@ -1,1128 +1,1039 @@
 const socket = io();
 
-const $ = id => document.getElementById(id);
+/* =========================
+   STATE
+========================= */
 
-const login = $("login");
-const skinScreen = $("skinScreen");
-const lobbyScreen = $("lobbyScreen");
-const duelScreen = $("duelScreen");
-
-const nameInput = $("nameInput");
-const startButton = $("startButton");
-const enterLobby = $("enterLobby");
-const skinGrid = $("skinGrid");
-
-const world = $("world");
-const ctx = world.getContext("2d");
-
-const arena = $("arena");
-const actx = arena.getContext("2d");
-
-const joystick = $("joystick");
-const stick = $("stick");
-
-const skins = [
-  { id:"neon", name:"Neon", color:"#65f5ff", accent:"#6670ff" },
-  { id:"cyber", name:"Cyber", color:"#ff4fd8", accent:"#704dff" },
-  { id:"ice", name:"Ice", color:"#baf8ff", accent:"#429cff" },
-  { id:"fire", name:"Fire", color:"#ff784f", accent:"#ff315f" },
-  { id:"shadow", name:"Shadow", color:"#a17cff", accent:"#25233c" },
-  { id:"toxic", name:"Toxic", color:"#a5ff4f", accent:"#35c878" },
-  { id:"gold", name:"Gold", color:"#ffe36e", accent:"#ff9d36" },
-  { id:"purple", name:"Purple", color:"#d66cff", accent:"#713cff" },
-  { id:"robot", name:"Robot", color:"#d9e1ef", accent:"#69758f" },
-  { id:"angel", name:"Angel", color:"#ffffff", accent:"#78e8ff" }
-];
-
-const maps = [
-  { id:"Neon City", name:"Neon City" },
-  { id:"Cyber Yard", name:"Cyber Yard" },
-  { id:"Desert Base", name:"Desert Base" },
-  { id:"Ice Station", name:"Ice Station" },
-  { id:"Space Lab", name:"Space Lab" }
-];
-
-let selfId = null;
-let myName = "";
-let selectedSkin = "neon";
-
+let me = null;
 let players = new Map();
 
 let duel = null;
-let arenaActive = false;
+let duelActive = false;
 
-let keys = {
-  up:false,
-  down:false,
-  left:false,
-  right:false
-};
+let selectedSkin = 0;
+let selectedMap = 0;
 
-let joy = {
-  x:0,
-  y:0
-};
+let aim = { x: 0, y: 0 };
+let keys = {};
+
+let joystickActive = false;
+let joystickTouchId = null;
+let joystickCenter = { x: 0, y: 0 };
 
 let lastMove = 0;
+let lastShot = 0;
 
-let aim = {
-  x:700,
-  y:350
-};
+/* =========================
+   HELPERS
+========================= */
 
-let audio = null;
+const $ = id => document.getElementById(id);
 
-function show(screen) {
-  [login, skinScreen, lobbyScreen, duelScreen]
-    .forEach(x => x.classList.add("hidden"));
-
-  screen.classList.remove("hidden");
+function show(id) {
+  const el = $(id);
+  if (el) el.style.display = "";
 }
 
-function sound(freq = 500) {
-  try {
-    audio ??= new (window.AudioContext || window.webkitAudioContext)();
-
-    const oscillator = audio.createOscillator();
-    const gain = audio.createGain();
-
-    oscillator.connect(gain);
-    gain.connect(audio.destination);
-
-    oscillator.frequency.value = freq;
-    gain.gain.value = 0.035;
-
-    oscillator.start();
-    oscillator.stop(audio.currentTime + 0.08);
-  } catch {}
+function hide(id) {
+  const el = $(id);
+  if (el) el.style.display = "none";
 }
 
-function skin(id) {
-  return skins.find(s => s.id === id) || skins[0];
+function text(id, value) {
+  const el = $(id);
+  if (el) el.textContent = value;
 }
 
-function escapeHTML(value) {
-  return String(value).replace(/[&<>"']/g, char => ({
-    "&":"&amp;",
-    "<":"&lt;",
-    ">":"&gt;",
-    '"':"&quot;",
-    "'":"&#039;"
-  }[char]));
+/* =========================
+   SCREENS
+========================= */
+
+function openScreen(id) {
+  document.querySelectorAll(".screen").forEach(el => {
+    el.classList.remove("active");
+  });
+
+  const el = $(id);
+  if (el) el.classList.add("active");
 }
 
-function toast(text) {
-  const element = $("toast");
+/* =========================
+   SOUND
+========================= */
 
-  element.textContent = text;
-  element.classList.remove("hidden");
+let audioCtx = null;
 
-  clearTimeout(element.timer);
+function audioStart() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
 
-  element.timer = setTimeout(() => {
-    element.classList.add("hidden");
-  }, 2500);
+  if (audioCtx.state === "suspended") {
+    audioCtx.resume();
+  }
+}
+
+function sound(type) {
+  audioStart();
+
+  if (!audioCtx) return;
+
+  const now = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+
+  if (type === "click") {
+    osc.frequency.setValueAtTime(500, now);
+    osc.frequency.exponentialRampToValueAtTime(800, now + 0.08);
+    gain.gain.setValueAtTime(0.08, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+  }
+
+  if (type === "shoot") {
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(180, now);
+    osc.frequency.exponentialRampToValueAtTime(55, now + 0.12);
+    gain.gain.setValueAtTime(0.16, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+  }
+
+  if (type === "hit") {
+    osc.type = "square";
+    osc.frequency.setValueAtTime(850, now);
+    osc.frequency.exponentialRampToValueAtTime(180, now + 0.1);
+    gain.gain.setValueAtTime(0.13, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+  }
+
+  if (type === "kill") {
+    osc.type = "square";
+    osc.frequency.setValueAtTime(220, now);
+    osc.frequency.exponentialRampToValueAtTime(900, now + 0.25);
+    gain.gain.setValueAtTime(0.16, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+  }
+
+  if (type === "win") {
+    osc.frequency.setValueAtTime(300, now);
+    osc.frequency.setValueAtTime(500, now + 0.12);
+    osc.frequency.setValueAtTime(750, now + 0.24);
+    gain.gain.setValueAtTime(0.15, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+  }
+
+  osc.start(now);
+  osc.stop(now + 0.6);
+}
+
+/* =========================
+   LOGIN
+========================= */
+
+const joinButton = $("joinBtn");
+const nameInput = $("nameInput");
+
+if (joinButton) {
+  joinButton.addEventListener("click", () => {
+    audioStart();
+
+    const name = nameInput?.value.trim();
+
+    if (!name) {
+      if (nameInput) nameInput.focus();
+      return;
+    }
+
+    me = {
+      name
+    };
+
+    socket.emit("player:join", {
+      name
+    });
+
+    sound("click");
+    openScreen("skinScreen");
+  });
 }
 
 /* =========================
    SKINS
 ========================= */
 
-function renderSkins() {
-  skinGrid.innerHTML = "";
+function renderSkins(skins = []) {
+  const grid = $("skinGrid");
+  if (!grid) return;
 
-  skins.forEach(s => {
-    const button = document.createElement("button");
+  grid.innerHTML = "";
 
-    button.className =
-      "skin" + (selectedSkin === s.id ? " selected" : "");
+  skins.forEach((skin, index) => {
+    const card = document.createElement("button");
 
-    button.innerHTML = `
-      <div
-        class="skinAvatar"
-        style="
-          background:linear-gradient(145deg,${s.color},${s.accent});
-          color:${s.color};
-        ">
-      </div>
+    card.className = "skinCard";
+    if (index === selectedSkin) {
+      card.classList.add("selected");
+    }
 
-      <div class="skinName">
-        ${s.name}
-      </div>
+    card.innerHTML = `
+      <div class="skinPreview"
+           style="background:${skin.color || "#7c5cff"}"></div>
+      <strong>${skin.name || "Skin " + (index + 1)}</strong>
     `;
 
-    button.onclick = () => {
-      selectedSkin = s.id;
-      renderSkins();
-      sound(700);
-    };
+    card.addEventListener("click", () => {
+      selectedSkin = index;
 
-    skinGrid.appendChild(button);
+      document
+        .querySelectorAll(".skinCard")
+        .forEach(x => x.classList.remove("selected"));
+
+      card.classList.add("selected");
+
+      sound("click");
+    });
+
+    grid.appendChild(card);
   });
 }
 
-startButton.onclick = () => {
-  myName = nameInput.value.trim().slice(0,18);
-
-  if (!myName) {
-    $("loginError").textContent = "Bitte gib einen Namen ein.";
-    return;
-  }
-
-  $("loginError").textContent = "";
-
-  renderSkins();
-  show(skinScreen);
-
-  sound(700);
-};
-
-nameInput.onkeydown = event => {
-  if (event.key === "Enter") {
-    startButton.click();
-  }
-};
-
-enterLobby.onclick = () => {
-  socket.emit("player:join", {
-    name:myName,
-    skin:selectedSkin
-  });
-
-  show(lobbyScreen);
-  sound(850);
-};
-
-$("changeSkin").onclick = () => {
-  renderSkins();
-  show(skinScreen);
-};
-
-/* =========================
-   LOBBY
-========================= */
-
-socket.on("player:joined", player => {
-  selfId = player.id;
-
-  players.set(player.id, player);
-
-  show(lobbyScreen);
-
-  addMessage(
-    "SYSTEM",
-    "Willkommen in Neon City!"
-  );
-
-  addMessage(
-    "SYSTEM",
-    "Fordere andere Spieler über 1v1 heraus."
-  );
-
-  updateOnline();
+socket.on("skins", skins => {
+  renderSkins(skins);
 });
 
-socket.on("lobby:state", list => {
-  players = new Map();
+const enterLobby = $("enterLobbyBtn");
+
+if (enterLobby) {
+  enterLobby.addEventListener("click", () => {
+    audioStart();
+
+    socket.emit("player:profile", {
+      skin: selectedSkin
+    });
+
+    sound("click");
+    openScreen("lobbyScreen");
+  });
+}
+
+/* =========================
+   PLAYER LIST
+========================= */
+
+function renderPlayers(list) {
+  players.clear();
 
   list.forEach(player => {
     players.set(player.id, player);
   });
 
-  updateOnline();
+  const container = $("onlinePlayers");
+  if (!container) return;
+
+  container.innerHTML = "";
+
+  list.forEach(player => {
+    if (me && player.id === me.id) return;
+
+    const row = document.createElement("div");
+    row.className = "onlinePlayer";
+
+    row.innerHTML = `
+      <div class="playerInfo">
+        <span class="playerDot"></span>
+        <span>${escapeHtml(player.name)}</span>
+      </div>
+      <button class="challengeBtn">1v1</button>
+    `;
+
+    row.querySelector("button").addEventListener("click", () => {
+      audioStart();
+      sound("click");
+
+      socket.emit("duel:challenge", {
+        targetId: player.id
+      });
+    });
+
+    container.appendChild(row);
+  });
+
+  text("onlineCount", `${list.length} ONLINE`);
+}
+
+socket.on("players:update", list => {
+  renderPlayers(list);
+});
+
+socket.on("player:list", list => {
+  renderPlayers(list);
+});
+
+/* =========================
+   PLAYER PROFILE
+========================= */
+
+socket.on("player:profile", player => {
+  me = player;
 });
 
 socket.on("player:updated", player => {
-  players.set(player.id, player);
-  updateOnline();
+  if (!player) return;
+
+  if (me && player.id === me.id) {
+    me = player;
+  }
 });
-
-socket.on("player:moved", player => {
-  players.set(player.id, player);
-});
-
-function updateOnline() {
-  const online = [...players.values()]
-    .filter(player => player.state === "lobby");
-
-  $("playerCount").textContent = online.length;
-
-  const list = $("onlineList");
-
-  list.innerHTML = `
-    <div class="onlineTitle">
-      ONLINE SPIELER
-    </div>
-  `;
-
-  online.forEach(player => {
-    const s = skin(player.skin);
-
-    const row = document.createElement("div");
-    row.className = "onlineRow";
-
-    row.innerHTML = `
-      <div
-        class="dotSkin"
-        style="
-          background:linear-gradient(145deg,${s.color},${s.accent});
-          color:${s.color};
-        ">
-      </div>
-
-      <div class="onlineName">
-        ${escapeHTML(player.name)}
-        ${player.id === selfId ? "(du)" : ""}
-      </div>
-    `;
-
-    if (player.id !== selfId) {
-      const button = document.createElement("button");
-
-      button.className = "duelBtn";
-      button.textContent = "1v1";
-
-      button.onclick = () => {
-        socket.emit("duel:challenge", player.id);
-        toast("1v1-Anfrage gesendet");
-      };
-
-      row.appendChild(button);
-    }
-
-    list.appendChild(row);
-  });
-}
 
 /* =========================
    CHAT
 ========================= */
 
-function addMessage(name, message) {
-  const box = $("messages");
-
-  const element = document.createElement("div");
-
-  element.className = "message";
-
-  element.innerHTML = `
-    <strong>${escapeHTML(name)}</strong>
-    <div>${escapeHTML(message)}</div>
-  `;
-
-  box.appendChild(element);
-
-  box.scrollTop = box.scrollHeight;
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
-$("chatForm").onsubmit = event => {
-  event.preventDefault();
+function addChat(message) {
+  const chat = $("chatMessages");
+  if (!chat) return;
 
-  const input = $("chatInput");
-  const message = input.value.trim();
+  const div = document.createElement("div");
+  div.className = "chatMessage";
+
+  div.innerHTML = `
+    <strong>${escapeHtml(message.name || "SYSTEM")}</strong>
+    <span>${escapeHtml(message.text || "")}</span>
+  `;
+
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+socket.on("chat:message", message => {
+  addChat(message);
+});
+
+const chatInput = $("chatInput");
+const chatSend = $("chatSend");
+
+function sendChat() {
+  if (!chatInput) return;
+
+  const message = chatInput.value.trim();
 
   if (!message) return;
 
-  socket.emit("chat:send", message);
+  socket.emit("chat:send", {
+    text: message
+  });
 
-  input.value = "";
+  chatInput.value = "";
+  sound("click");
+}
 
-  sound(500);
-};
+if (chatSend) {
+  chatSend.addEventListener("click", sendChat);
+}
 
-socket.on("chat:message", data => {
-  addMessage(data.name, data.text);
-});
+if (chatInput) {
+  chatInput.addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      sendChat();
+    }
+  });
+}
 
 /* =========================
    CHALLENGE
 ========================= */
 
-let currentInvite = null;
-
 socket.on("duel:invite", data => {
-  currentInvite = data;
+  const modal = $("challengeModal");
 
-  $("inviteText").textContent =
-    `${data.from.name} fordert dich zu einem 1v1 heraus.`;
+  if (modal) {
+    modal.style.display = "flex";
+  }
 
-  $("duelInvite").classList.remove("hidden");
+  text(
+    "challengeText",
+    `${data.fromName || "Ein Spieler"} fordert dich zu einem 1v1 heraus!`
+  );
 
-  sound(900);
+  window.currentChallenge = data;
+
+  sound("click");
 });
 
-$("acceptInvite").onclick = () => {
-  if (!currentInvite) return;
+const acceptChallenge = $("acceptChallenge");
+const declineChallenge = $("declineChallenge");
 
-  $("duelInvite").classList.add("hidden");
+if (acceptChallenge) {
+  acceptChallenge.addEventListener("click", () => {
+    const data = window.currentChallenge;
 
-  socket.emit(
-    "duel:accept",
-    currentInvite.from.id
-  );
+    if (data) {
+      socket.emit("duel:accept", {
+        challengerId: data.fromId
+      });
+    }
 
-  sound(1000);
-};
+    hide("challengeModal");
+    sound("click");
+  });
+}
 
-$("declineInvite").onclick = () => {
-  if (!currentInvite) return;
+if (declineChallenge) {
+  declineChallenge.addEventListener("click", () => {
+    const data = window.currentChallenge;
 
-  $("duelInvite").classList.add("hidden");
+    if (data) {
+      socket.emit("duel:decline", {
+        challengerId: data.fromId
+      });
+    }
 
-  socket.emit(
-    "duel:decline",
-    currentInvite.from.id
-  );
-
-  currentInvite = null;
-};
+    hide("challengeModal");
+    sound("click");
+  });
+});
 
 /* =========================
-   DUEL
+   DUEL STATE
 ========================= */
 
-socket.on("duel:state", data => {
-  duel = data;
+socket.on("duel:state", state => {
+  duel = state;
+  duelActive = true;
 
-  show(duelScreen);
+  hide("lobbyScreen");
+  openScreen("duelScreen");
 
-  renderDuel();
+  renderMaps(state.maps || []);
+  updateDuelHud();
 
-  if (data.phase === "fight") {
-    startArena();
-  } else {
-    arenaActive = false;
+  sound("click");
+});
 
-    $("mapSelect").classList.remove("hidden");
-    $("fightArea").classList.add("hidden");
+socket.on("duel:playerMoved", player => {
+  if (!duel || !duel.players) return;
+
+  const index = duel.players.findIndex(
+    p => p.id === player.id
+  );
+
+  if (index !== -1) {
+    duel.players[index] = {
+      ...duel.players[index],
+      ...player
+    };
   }
 });
 
-function renderDuel() {
-  if (!duel) return;
+/* =========================
+   MAP SELECTION
+========================= */
 
-  const me = duel.players.find(
-    player => player.id === selfId
-  );
-
-  const enemy = duel.players.find(
-    player => player.id !== selfId
-  );
-
-  renderFighter(
-    $("playerCardA"),
-    me
-  );
-
-  renderFighter(
-    $("playerCardB"),
-    enemy
-  );
-
-  renderMaps();
-
-  $("roundText").textContent =
-    `ROUND ${duel.round || 1}`;
-
-  $("duelRoundLabel").textContent =
-    duel.phase === "fight"
-      ? "FIGHT"
-      : "MAP SELECT";
-
-  updateHP();
-}
-
-function renderFighter(element, player) {
-  if (!player) {
-    element.innerHTML = "";
-    return;
-  }
-
-  const s = skin(player.skin);
-
-  element.innerHTML = `
-    <div
-      class="fighterAvatar"
-      style="
-        background:linear-gradient(145deg,${s.color},${s.accent});
-      ">
-    </div>
-
-    <div class="fighterText">
-      <b>${escapeHTML(player.name)}</b>
-      <small>${s.name}</small>
-    </div>
-
-    <div class="fighterScore">
-      ${duel.scores[player.id] || 0}
-    </div>
-  `;
-}
-
-function renderMaps() {
+function renderMaps(maps) {
   const grid = $("mapGrid");
+  if (!grid) return;
 
   grid.innerHTML = "";
 
-  const myChoice = duel?.choices?.[selfId];
+  maps.forEach((map, index) => {
+    const card = document.createElement("button");
 
-  maps.forEach(map => {
-    const button = document.createElement("button");
+    card.className = "mapCard";
 
-    button.className =
-      "mapCard" +
-      (myChoice === map.id ? " selected" : "");
+    if (selectedMap === index) {
+      card.classList.add("selected");
+    }
 
-    button.innerHTML = `
-      <b>${map.name}</b>
-      <small>
-        ${map.id.toUpperCase()} // ARENA
-      </small>
+    card.innerHTML = `
+      <strong>${map.name || "MAP " + (index + 1)}</strong>
+      <span>${map.description || "Arena"}</span>
     `;
 
-    button.onclick = () => {
-      socket.emit("duel:mapChoice", map.id);
-      sound(700);
-    };
+    card.addEventListener("click", () => {
+      selectedMap = index;
 
-    grid.appendChild(button);
+      document
+        .querySelectorAll(".mapCard")
+        .forEach(x => x.classList.remove("selected"));
+
+      card.classList.add("selected");
+
+      socket.emit("duel:mapChoice", {
+        map: index
+      });
+
+      sound("click");
+    });
+
+    grid.appendChild(card);
   });
-
-  const enemy = duel?.players?.find(
-    player => player.id !== selfId
-  );
-
-  const myReady =
-    duel?.ready?.[selfId] === true;
-
-  const enemyReady =
-    enemy && duel?.ready?.[enemy.id] === true;
-
-  $("readyStatus").textContent =
-    `${myReady ? "✓ DU BIST READY" : "MAP WÄHLEN"} · ` +
-    `${enemyReady ? "✓ GEGNER READY" : "GEGNER WÄHLT..."}`;
-}
-
-$("readyButton").onclick = () => {
-  if (!duel?.map) {
-    toast("Wähle zuerst eine Map!");
-    return;
-  }
-
-  socket.emit("duel:ready");
-
-  sound(800);
-};
-
-function startArena() {
-  arenaActive = true;
-
-  $("mapSelect").classList.add("hidden");
-  $("fightArea").classList.remove("hidden");
-
-  $("mapName").textContent =
-    String(duel.map || "ARENA").toUpperCase();
-
-  $("roundText").textContent =
-    `ROUND ${duel.round || 1}`;
-
-  updateHP();
-
-  sound(1000);
 }
 
 /* =========================
-   HP
+   READY
 ========================= */
 
-function updateHP() {
-  if (!duel) return;
+const readyButton = $("readyBtn");
 
-  const enemy = duel.players.find(
-    player => player.id !== selfId
-  );
-
-  const myHP =
-    duel.hp?.[selfId] ?? 100;
-
-  const enemyHP =
-    enemy
-      ? duel.hp?.[enemy.id] ?? 100
-      : 100;
-
-  $("hpMe").style.width =
-    `${Math.max(0,myHP)}%`;
-
-  $("hpEnemy").style.width =
-    `${Math.max(0,enemyHP)}%`;
-
-  $("hpMeText").textContent = myHP;
-  $("hpEnemyText").textContent = enemyHP;
-
-  $("hpEnemyLabel").textContent =
-    enemy?.name || "ENEMY";
+if (readyButton) {
+  readyButton.addEventListener("click", () => {
+    socket.emit("duel:ready");
+    sound("click");
+  });
 }
-
-socket.on("duel:hit", data => {
-  if (!duel) return;
-
-  duel.hp[data.targetId] = data.hp;
-
-  updateHP();
-
-  sound(
-    data.targetId === selfId
-      ? 150
-      : 650
-  );
-});
-
-socket.on("duel:roundEnd", data => {
-  arenaActive = false;
-
-  $("mapSelect").classList.remove("hidden");
-  $("fightArea").classList.add("hidden");
-
-  if (duel) {
-    duel.scores = data.scores;
-  }
-
-  const winner =
-    players.get(data.winnerId);
-
-  toast(
-    `${winner?.name || "Spieler"} gewinnt die Runde!`
-  );
-
-  sound(1100);
-});
-
-socket.on("duel:matchEnd", data => {
-  arenaActive = false;
-
-  const winnerName =
-    players.get(data.winnerId)?.name ||
-    "Spieler";
-
-  $("matchTitle").textContent =
-    data.winnerId === selfId
-      ? "SIEG 🏆"
-      : "NIEDERLAGE";
-
-  $("matchText").textContent =
-    `${winnerName} gewinnt das Match mit 3 Runden.`;
-
-  $("matchModal").classList.remove("hidden");
-
-  sound(1200);
-});
-
-$("continueMatch").onclick = () => {
-  $("matchModal").classList.add("hidden");
-
-  socket.emit("duel:continue");
-};
-
-$("backLobby").onclick = () => {
-  $("matchModal").classList.add("hidden");
-
-  socket.emit("duel:returnLobby");
-};
-
-$("leaveDuel").onclick = () => {
-  socket.emit("duel:returnLobby");
-};
-
-socket.on("duel:leave", () => {
-  duel = null;
-  arenaActive = false;
-
-  $("matchModal").classList.add("hidden");
-
-  show(lobbyScreen);
-
-  toast("Zurück in der Lobby");
-});
-
-socket.on("duel:opponentLeft", () => {
-  duel = null;
-  arenaActive = false;
-
-  show(lobbyScreen);
-
-  toast("Der andere Spieler hat die Arena verlassen.");
-});
 
 /* =========================
-   MOVEMENT
+   DUEL MOVEMENT
 ========================= */
 
-function getSelf() {
-  return players.get(selfId);
-}
+function moveVector(dx, dy) {
+  const length = Math.sqrt(dx * dx + dy * dy);
 
-function movePlayer(time) {
-  const player = getSelf();
+  if (length > 1) {
+    dx /= length;
+    dy /= length;
+  }
 
-  if (!player) return;
-
-  let x =
-    (keys.right ? 1 : 0) -
-    (keys.left ? 1 : 0) +
-    joy.x;
-
-  let y =
-    (keys.down ? 1 : 0) -
-    (keys.up ? 1 : 0) +
-    joy.y;
-
-  const length =
-    Math.hypot(x,y);
-
-  if (!length) return;
-
-  x /= Math.max(1,length);
-  y /= Math.max(1,length);
-
-  const speed =
-    arenaActive ? 4.2 : 5;
-
-  player.x += x * speed;
-  player.y += y * speed;
-
-  if (arenaActive) {
-    player.x =
-      Math.max(40,Math.min(1360,player.x));
-
-    player.y =
-      Math.max(40,Math.min(660,player.y));
+  if (duelActive) {
+    socket.emit("duel:move", {
+      dx,
+      dy
+    });
   } else {
-    player.x =
-      Math.max(40,Math.min(1460,player.x));
-
-    player.y =
-      Math.max(40,Math.min(860,player.y));
-  }
-
-  if (time - lastMove > 35) {
-    lastMove = time;
-
-    if (arenaActive) {
-      socket.emit("duel:move", {
-        dx:x * speed,
-        dy:y * speed
-      });
-    } else {
-      socket.emit("lobby:move", {
-        dx:x * speed,
-        dy:y * speed
-      });
-    }
+    socket.emit("player:move", {
+      dx,
+      dy
+    });
   }
 }
 
-window.onkeydown = event => {
-  if (
-    ["INPUT","TEXTAREA"].includes(
-      event.target.tagName
-    )
-  ) return;
+/* KEYBOARD */
 
-  if (
-    event.key === "w" ||
-    event.key === "W" ||
-    event.key === "ArrowUp"
-  ) keys.up = true;
+window.addEventListener("keydown", e => {
+  keys[e.key.toLowerCase()] = true;
+});
 
-  if (
-    event.key === "s" ||
-    event.key === "S" ||
-    event.key === "ArrowDown"
-  ) keys.down = true;
+window.addEventListener("keyup", e => {
+  keys[e.key.toLowerCase()] = false;
+});
 
-  if (
-    event.key === "a" ||
-    event.key === "A" ||
-    event.key === "ArrowLeft"
-  ) keys.left = true;
+function keyboardLoop() {
+  let dx = 0;
+  let dy = 0;
 
-  if (
-    event.key === "d" ||
-    event.key === "D" ||
-    event.key === "ArrowRight"
-  ) keys.right = true;
+  if (keys["w"] || keys["arrowup"]) dy -= 1;
+  if (keys["s"] || keys["arrowdown"]) dy += 1;
+  if (keys["a"] || keys["arrowleft"]) dx -= 1;
+  if (keys["d"] || keys["arrowright"]) dx += 1;
 
-  if (
-    event.code === "Space" &&
-    arenaActive
-  ) {
-    event.preventDefault();
-    shoot();
+  if (dx !== 0 || dy !== 0) {
+    moveVector(dx, dy);
   }
-};
 
-window.onkeyup = event => {
-  if (
-    event.key === "w" ||
-    event.key === "W" ||
-    event.key === "ArrowUp"
-  ) keys.up = false;
+  requestAnimationFrame(keyboardLoop);
+}
 
-  if (
-    event.key === "s" ||
-    event.key === "S" ||
-    event.key === "ArrowDown"
-  ) keys.down = false;
-
-  if (
-    event.key === "a" ||
-    event.key === "A" ||
-    event.key === "ArrowLeft"
-  ) keys.left = false;
-
-  if (
-    event.key === "d" ||
-    event.key === "D" ||
-    event.key === "ArrowRight"
-  ) keys.right = false;
-};
+keyboardLoop();
 
 /* =========================
-   MOBILE JOYSTICK
+   JOYSTICK
 ========================= */
 
-function setJoystick(clientX,clientY) {
-  const rect =
-    joystick.getBoundingClientRect();
-
-  let dx =
-    clientX -
-    (rect.left + rect.width / 2);
-
-  let dy =
-    clientY -
-    (rect.top + rect.height / 2);
-
-  const max = 40;
-
-  const distance =
-    Math.hypot(dx,dy);
-
-  if (distance > max) {
-    dx = dx / distance * max;
-    dy = dy / distance * max;
-  }
-
-  joy.x = dx / max;
-  joy.y = dy / max;
-
-  stick.style.transform =
-    `translate(${dx}px,${dy}px)`;
-}
-
-joystick.addEventListener(
-  "pointerdown",
-  event => {
-    joystick.setPointerCapture(
-      event.pointerId
-    );
-
-    setJoystick(
-      event.clientX,
-      event.clientY
-    );
-  }
-);
-
-joystick.addEventListener(
-  "pointermove",
-  event => {
-    if (
-      event.pressure ||
-      event.buttons
-    ) {
-      setJoystick(
-        event.clientX,
-        event.clientY
-      );
-    }
-  }
-);
+const joystick = $("joystick");
+const joystickKnob = $("joystickKnob");
 
 function resetJoystick() {
-  joy.x = 0;
-  joy.y = 0;
+  joystickActive = false;
+  joystickTouchId = null;
 
-  stick.style.transform =
-    "translate(0,0)";
+  if (joystickKnob) {
+    joystickKnob.style.transform =
+      "translate(-50%, -50%)";
+  }
 }
 
-joystick.addEventListener(
-  "pointerup",
-  resetJoystick
-);
+function joystickMove(clientX, clientY) {
+  if (!joystick || !joystickKnob) return;
 
-joystick.addEventListener(
-  "pointercancel",
-  resetJoystick
-);
+  const rect = joystick.getBoundingClientRect();
+
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+
+  let dx = clientX - centerX;
+  let dy = clientY - centerY;
+
+  const maxDistance = Math.min(rect.width, rect.height) * 0.34;
+
+  const distance = Math.sqrt(dx * dx + dy * dy);
+
+  if (distance > maxDistance) {
+    dx = dx / distance * maxDistance;
+    dy = dy / distance * maxDistance;
+  }
+
+  joystickKnob.style.transform =
+    `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+
+  const normalizedX = dx / maxDistance;
+  const normalizedY = dy / maxDistance;
+
+  moveVector(normalizedX, normalizedY);
+}
+
+/*
+   IMPORTANT:
+   We use pointer events instead of separate
+   touch + mouse handlers.
+   This works much better on iPad/iPhone.
+*/
+
+if (joystick) {
+  joystick.style.touchAction = "none";
+
+  joystick.addEventListener("pointerdown", e => {
+    e.preventDefault();
+
+    audioStart();
+
+    joystickActive = true;
+    joystickTouchId = e.pointerId;
+
+    joystick.setPointerCapture(e.pointerId);
+
+    joystickMove(e.clientX, e.clientY);
+  });
+
+  joystick.addEventListener("pointermove", e => {
+    if (!joystickActive) return;
+    if (e.pointerId !== joystickTouchId) return;
+
+    e.preventDefault();
+
+    joystickMove(e.clientX, e.clientY);
+  });
+
+  joystick.addEventListener("pointerup", e => {
+    if (e.pointerId !== joystickTouchId) return;
+
+    e.preventDefault();
+    resetJoystick();
+  });
+
+  joystick.addEventListener("pointercancel", e => {
+    if (e.pointerId !== joystickTouchId) return;
+
+    resetJoystick();
+  });
+}
+
+/* =========================
+   AIM
+========================= */
+
+const arenaCanvas = $("arenaCanvas");
+const lobbyCanvas = $("lobbyCanvas");
+
+function updateAim(clientX, clientY) {
+  const canvas = arenaCanvas || lobbyCanvas;
+
+  if (!canvas) return;
+
+  const rect = canvas.getBoundingClientRect();
+
+  aim.x = clientX - rect.left;
+  aim.y = clientY - rect.top;
+}
+
+if (arenaCanvas) {
+  arenaCanvas.style.touchAction = "none";
+
+  arenaCanvas.addEventListener("pointermove", e => {
+    updateAim(e.clientX, e.clientY);
+  });
+
+  arenaCanvas.addEventListener("pointerdown", e => {
+    updateAim(e.clientX, e.clientY);
+  });
+}
 
 /* =========================
    SHOOTING
 ========================= */
 
-function updateAim(event) {
-  const rect =
-    arena.getBoundingClientRect();
-
-  aim.x =
-    (event.clientX - rect.left) *
-    arena.width /
-    rect.width;
-
-  aim.y =
-    (event.clientY - rect.top) *
-    arena.height /
-    rect.height;
-}
-
-arena.addEventListener(
-  "pointermove",
-  updateAim
-);
-
-arena.addEventListener(
-  "pointerdown",
-  event => {
-    updateAim(event);
-
-    if (event.pointerType !== "touch") {
-      shoot();
-    }
-  }
-);
-
-$("fireButton").onclick = () => {
-  shoot();
-};
-
 function shoot() {
-  if (!arenaActive) return;
+  if (!duelActive) return;
 
-  const player = getSelf();
+  const now = Date.now();
+
+  if (now - lastShot < 180) return;
+
+  lastShot = now;
+
+  const canvas = arenaCanvas;
+
+  if (!canvas) return;
+
+  const rect = canvas.getBoundingClientRect();
+
+  const player = duel?.players?.find(
+    p => me && p.id === me.id
+  );
 
   if (!player) return;
 
+  const playerScreenX = player.x;
+  const playerScreenY = player.y;
+
+  const dx = aim.x - playerScreenX;
+  const dy = aim.y - playerScreenY;
+
   socket.emit("duel:shoot", {
-    x:aim.x - player.x,
-    y:aim.y - player.y
+    x: dx,
+    y: dy
   });
 
-  sound(180);
+  sound("shoot");
+}
+
+/* FIRE BUTTON */
+
+const fireButton = $("fireButton");
+
+if (fireButton) {
+  fireButton.style.touchAction = "none";
+
+  fireButton.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    audioStart();
+    shoot();
+  });
 }
 
 /* =========================
-   LOBBY DRAW
+   DUEL EVENTS
+========================= */
+
+socket.on("duel:hit", data => {
+  sound("hit");
+
+  if (navigator.vibrate) {
+    navigator.vibrate(35);
+  }
+});
+
+socket.on("duel:roundEnd", data => {
+  sound("kill");
+
+  if (navigator.vibrate) {
+    navigator.vibrate([50, 40, 80]);
+  }
+
+  duelActive = false;
+
+  updateDuelHud();
+});
+
+socket.on("duel:matchEnd", data => {
+  duelActive = false;
+
+  sound("win");
+
+  if (navigator.vibrate) {
+    navigator.vibrate([80, 60, 120]);
+  }
+
+  const modal = $("matchModal");
+
+  if (modal) {
+    modal.style.display = "flex";
+  }
+
+  if (data && data.winnerName) {
+    text(
+      "matchResult",
+      `${data.winnerName} gewinnt!`
+    );
+  }
+});
+
+/* =========================
+   CONTINUE
+========================= */
+
+const continueButton = $("continueBtn");
+const lobbyButton = $("returnLobbyBtn");
+
+if (continueButton) {
+  continueButton.addEventListener("click", () => {
+    socket.emit("duel:continue");
+    sound("click");
+  });
+}
+
+if (lobbyButton) {
+  lobbyButton.addEventListener("click", () => {
+    socket.emit("duel:returnLobby");
+
+    hide("matchModal");
+    duelActive = false;
+
+    openScreen("lobbyScreen");
+
+    sound("click");
+  });
+}
+
+/* =========================
+   DUEL HUD
+========================= */
+
+function updateDuelHud() {
+  if (!duel) return;
+
+  const myPlayer = duel.players?.find(
+    p => me && p.id === me.id
+  );
+
+  const enemy = duel.players?.find(
+    p => me && p.id !== me.id
+  );
+
+  if (myPlayer) {
+    text("myHp", `${myPlayer.hp ?? 100} HP`);
+  }
+
+  if (enemy) {
+    text("enemyHp", `${enemy.hp ?? 100} HP`);
+  }
+
+  if (duel.scores) {
+    const myScore =
+      me && duel.scores[me.id] != null
+        ? duel.scores[me.id]
+        : 0;
+
+    const enemyId =
+      enemy?.id;
+
+    const enemyScore =
+      enemyId && duel.scores[enemyId] != null
+        ? duel.scores[enemyId]
+        : 0;
+
+    text("myScore", myScore);
+    text("enemyScore", enemyScore);
+  }
+}
+
+/* =========================
+   LOBBY CANVAS
 ========================= */
 
 function drawLobby() {
-  ctx.clearRect(
-    0,
-    0,
-    world.width,
-    world.height
-  );
+  const canvas = lobbyCanvas;
 
-  const gradient =
-    ctx.createLinearGradient(
-      0,0,
-      world.width,
-      world.height
-    );
+  if (!canvas) {
+    requestAnimationFrame(drawLobby);
+    return;
+  }
 
-  gradient.addColorStop(
-    0,
-    "#07152a"
-  );
+  const ctx = canvas.getContext("2d");
 
-  gradient.addColorStop(
-    1,
-    "#090712"
-  );
+  const rect = canvas.getBoundingClientRect();
 
-  ctx.fillStyle = gradient;
+  const dpr = window.devicePixelRatio || 1;
 
-  ctx.fillRect(
-    0,
-    0,
-    world.width,
-    world.height
-  );
-
-  ctx.strokeStyle = "#6ff6ff12";
-
-  for (
-    let x=0;
-    x<world.width;
-    x+=50
+  if (
+    canvas.width !== Math.floor(rect.width * dpr) ||
+    canvas.height !== Math.floor(rect.height * dpr)
   ) {
+    canvas.width = Math.floor(rect.width * dpr);
+    canvas.height = Math.floor(rect.height * dpr);
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  ctx.clearRect(0, 0, rect.width, rect.height);
+
+  /* GRID */
+
+  const grid = 42;
+
+  ctx.strokeStyle = "rgba(80,130,255,.12)";
+  ctx.lineWidth = 1;
+
+  for (let x = 0; x < rect.width; x += grid) {
     ctx.beginPath();
-    ctx.moveTo(x,0);
-    ctx.lineTo(x,world.height);
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, rect.height);
     ctx.stroke();
   }
 
-  for (
-    let y=0;
-    y<world.height;
-    y+=50
-  ) {
+  for (let y = 0; y < rect.height; y += grid) {
     ctx.beginPath();
-    ctx.moveTo(0,y);
-    ctx.lineTo(world.width,y);
+    ctx.moveTo(0, y);
+    ctx.lineTo(rect.width, y);
     ctx.stroke();
   }
+
+  /* PLAYERS */
 
   players.forEach(player => {
     if (player.state !== "lobby") return;
 
-    const s = skin(player.skin);
+    const x = player.x ?? rect.width / 2;
+    const y = player.y ?? rect.height / 2;
 
     ctx.beginPath();
+    ctx.arc(x, y, 12, 0, Math.PI * 2);
 
-    ctx.arc(
-      player.x,
-      player.y,
-      player.id === selfId ? 19 : 16,
-      0,
-      Math.PI * 2
-    );
-
-    ctx.fillStyle = s.color;
-
-    ctx.shadowBlur = 25;
-    ctx.shadowColor = s.color;
+    ctx.fillStyle = player.color || "#8b5cff";
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = player.color || "#8b5cff";
 
     ctx.fill();
 
     ctx.shadowBlur = 0;
 
+    ctx.font = "12px sans-serif";
+    ctx.textAlign = "center";
     ctx.fillStyle = "#fff";
 
-    ctx.font = "bold 14px Arial";
-
-    ctx.textAlign = "center";
-
     ctx.fillText(
-      player.name,
-      player.x,
-      player.y - 28
+      player.name || "Player",
+      x,
+      y - 20
     );
   });
 
   requestAnimationFrame(drawLobby);
 }
 
+drawLobby();
+
 /* =========================
-   ARENA DRAW
+   ARENA CANVAS
 ========================= */
 
 function drawArena() {
-  actx.clearRect(
-    0,
-    0,
-    arena.width,
-    arena.height
-  );
+  const canvas = arenaCanvas;
 
-  let background = "#0b1230";
-
-  if (duel?.map === "Ice Station") {
-    background = "#0b2331";
+  if (!canvas) {
+    requestAnimationFrame(drawArena);
+    return;
   }
 
-  if (duel?.map === "Desert Base") {
-    background = "#302014";
-  }
+  const ctx = canvas.getContext("2d");
 
-  if (duel?.map === "Cyber Yard") {
-    background = "#14152d";
-  }
+  const rect = canvas.getBoundingClientRect();
 
-  if (duel?.map === "Space Lab") {
-    background = "#111326";
-  }
+  const dpr = window.devicePixelRatio || 1;
 
-  if (duel?.map === "Neon City") {
-    background = "#160f2b";
-  }
-
-  actx.fillStyle = background;
-
-  actx.fillRect(
-    0,
-    0,
-    arena.width,
-    arena.height
-  );
-
-  actx.strokeStyle = "#ffffff10";
-
-  for (
-    let x=0;
-    x<arena.width;
-    x+=50
+  if (
+    canvas.width !== Math.floor(rect.width * dpr) ||
+    canvas.height !== Math.floor(rect.height * dpr)
   ) {
-    actx.beginPath();
-    actx.moveTo(x,0);
-    actx.lineTo(x,arena.height);
-    actx.stroke();
+    canvas.width = Math.floor(rect.width * dpr);
+    canvas.height = Math.floor(rect.height * dpr);
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  for (
-    let y=0;
-    y<arena.height;
-    y+=50
-  ) {
-    actx.beginPath();
-    actx.moveTo(0,y);
-    actx.lineTo(arena.width,y);
-    actx.stroke();
+  ctx.clearRect(0, 0, rect.width, rect.height);
+
+  /* ARENA BACKGROUND */
+
+  ctx.fillStyle = "#050817";
+  ctx.fillRect(0, 0, rect.width, rect.height);
+
+  const grid = 45;
+
+  ctx.strokeStyle = "rgba(100,130,255,.1)";
+  ctx.lineWidth = 1;
+
+  for (let x = 0; x < rect.width; x += grid) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, rect.height);
+    ctx.stroke();
   }
 
-  if (duel) {
+  for (let y = 0; y < rect.height; y += grid) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(rect.width, y);
+    ctx.stroke();
+  }
+
+  /* PLAYERS */
+
+  if (duel?.players) {
     duel.players.forEach(player => {
-      const s = skin(player.skin);
+      const x = player.x ?? rect.width / 2;
+      const y = player.y ?? rect.height / 2;
 
-      actx.beginPath();
+      const color =
+        player.id === me?.id
+          ? "#5c7cff"
+          : "#ff4f70";
 
-      actx.arc(
-        player.x,
-        player.y,
-        18,
+      ctx.beginPath();
+      ctx.arc(x, y, 16, 0, Math.PI * 2);
+
+      ctx.fillStyle = color;
+      ctx.shadowBlur = 25;
+      ctx.shadowColor = color;
+
+      ctx.fill();
+
+      ctx.shadowBlur = 0;
+
+      /* HP BAR */
+
+      const hp = Math.max(
         0,
-        Math.PI * 2
+        Math.min(100, player.hp ?? 100)
       );
 
-      actx.fillStyle = s.color;
+      ctx.fillStyle = "rgba(0,0,0,.5)";
+      ctx.fillRect(
+        x - 25,
+        y - 32,
+        50,
+        6
+      );
 
-      actx.shadowBlur = 25;
-      actx.shadowColor = s.color;
+      ctx.fillStyle = "#4dff88";
+      ctx.fillRect(
+        x - 25,
+        y - 32,
+        50 * (hp / 100),
+        6
+      );
 
-      actx.fill();
+      ctx.font = "12px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#fff";
 
-      actx.shadowBlur = 0;
-
-      actx.fillStyle = "#fff";
-
-      actx.font = "bold 13px Arial";
-
-      actx.textAlign = "center";
-
-      actx.fillText(
-        player.name,
-        player.x,
-        player.y - 27
+      ctx.fillText(
+        player.name || "Player",
+        x,
+        y + 34
       );
     });
   }
@@ -1130,21 +1041,42 @@ function drawArena() {
   requestAnimationFrame(drawArena);
 }
 
+drawArena();
+
 /* =========================
-   GAME LOOP
+   RESIZE
 ========================= */
 
-function gameLoop(time) {
-  if (
-    !lobbyScreen.classList.contains("hidden") ||
-    arenaActive
-  ) {
-    movePlayer(time);
+window.addEventListener("resize", () => {
+  resetJoystick();
+});
+
+/* =========================
+   CONNECTION
+========================= */
+
+socket.on("connect", () => {
+  console.log("Connected:", socket.id);
+
+  if (me) {
+    me.id = socket.id;
   }
+});
 
-  requestAnimationFrame(gameLoop);
-}
+socket.on("disconnect", () => {
+  console.log("Disconnected");
+});
 
-requestAnimationFrame(gameLoop);
-requestAnimationFrame(drawLobby);
-requestAnimationFrame(drawArena);
+/* =========================
+   ERROR HANDLING
+========================= */
+
+socket.on("error", message => {
+  console.error(message);
+});
+
+/* =========================
+   START
+========================= */
+
+console.log("LHX Neon Arena controls loaded.");
