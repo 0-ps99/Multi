@@ -1,88 +1,175 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="de">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LHX Multiplayer</title>
-    <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#070812">
+<title>LHX Neon Arena</title>
+<link rel="stylesheet" href="style.css">
 </head>
 
 <body>
 
-    <div id="login">
-        <div class="card">
-            <div class="logo">LHX</div>
+<section id="login" class="screen">
+  <div class="loginCard glass">
+    <div class="brand">LHX<span>NEON</span></div>
+    <div class="eyebrow">ONLINE MULTIPLAYER</div>
+    <h1>ENTER THE ARENA</h1>
+    <p>Gib deinen Namen ein und wähle danach deinen Skin.</p>
+    <input id="nameInput" maxlength="18" placeholder="Dein Name" autocomplete="off">
+    <button id="startButton" class="primary">SKIN AUSWÄHLEN →</button>
+    <div id="loginError"></div>
+  </div>
+</section>
 
-            <h1>Online Lobby</h1>
+<section id="skinScreen" class="screen hidden">
+  <div class="selectionCard glass">
+    <div class="topline">
+      <span>01</span>
+      <b>DEIN SKIN</b>
+      <span>10 SKINS</span>
+    </div>
+    <h2>WÄHLE DEINEN LOOK</h2>
+    <div id="skinGrid" class="skinGrid"></div>
+    <button id="enterLobby" class="primary">LOBBY BETRETEN ⚡</button>
+  </div>
+</section>
 
-            <p>
-                Triff dich mit anderen Spielern online.
-            </p>
+<section id="lobbyScreen" class="hidden full">
+  <header class="topbar glass">
+    <div class="brand small">LHX<span>NEON</span></div>
+    <div class="topStats">🟢 <b id="playerCount">0</b> ONLINE</div>
+    <button id="changeSkin" class="miniBtn">SKIN</button>
+  </header>
 
-            <input
-                id="nameInput"
-                maxlength="18"
-                placeholder="Dein Name"
-                autocomplete="off"
-            >
+  <main class="lobbyLayout">
+    <div class="worldPanel glass">
+      <canvas id="world" width="1500" height="900"></canvas>
 
-            <button id="joinButton">
-                Lobby betreten
-            </button>
+      <div class="worldTitle">
+        <b>NEON CITY</b>
+        <span>FREE ROAM</span>
+      </div>
 
-            <div id="loginError"></div>
-        </div>
+      <div id="joystick" class="joystick">
+        <div id="stick" class="stick"></div>
+      </div>
+
+      <div class="moveHint">W A S D / JOYSTICK</div>
     </div>
 
-    <div id="game" class="hidden">
+    <aside class="sidePanel glass">
+      <div class="panelHead">
+        <b>LOBBY CHAT</b>
+        <small>Spieler anklicken → 1v1</small>
+      </div>
 
-        <header>
-            <strong>LHX</strong>
+      <div id="messages" class="messages"></div>
+      <div id="onlineList" class="onlineList"></div>
 
-            <div>
-                🟢 <span id="playerCount">0</span> online
-            </div>
-        </header>
+      <form id="chatForm" class="chatForm">
+        <input id="chatInput" maxlength="180" placeholder="Nachricht..." autocomplete="off">
+        <button>➤</button>
+      </form>
+    </aside>
+  </main>
+</section>
 
-        <div class="game">
+<section id="duelScreen" class="hidden full duelBg">
 
-            <div class="world">
-                <canvas
-                    id="world"
-                    width="1200"
-                    height="700"
-                ></canvas>
+  <header class="duelTop glass">
+    <div class="brand small">LHX<span>DUEL</span></div>
+    <div id="duelRoundLabel">MAP SELECT</div>
+    <button id="leaveDuel" class="miniBtn">LOBBY</button>
+  </header>
 
-                <div id="joystick">
-                    <div id="stick"></div>
-                </div>
-            </div>
+  <div class="duelShell">
 
-            <div class="chat">
+    <div class="scoreRow glass">
+      <div id="playerCardA" class="fighterCard"></div>
+      <div class="versus">VS</div>
+      <div id="playerCardB" class="fighterCard"></div>
+    </div>
 
-                <h3>Lobby Chat</h3>
+    <div id="mapSelect" class="mapSelect glass">
+      <div class="eyebrow">02 // CHOOSE YOUR BATTLEFIELD</div>
+      <h2>WÄHLE DEINE MAP</h2>
+      <p>Gleiche Map = diese Map. Unterschiedliche Wahl = zufällige Auswahl.</p>
 
-                <div id="messages"></div>
+      <div id="mapGrid" class="mapGrid"></div>
 
-                <form id="chatForm">
-                    <input
-                        id="chatInput"
-                        maxlength="180"
-                        placeholder="Nachricht..."
-                        autocomplete="off"
-                    >
+      <button id="readyButton" class="primary">READY ⚡</button>
+      <div id="readyStatus"></div>
+    </div>
 
-                    <button>Senden</button>
-                </form>
+    <div id="fightArea" class="hidden fightArea">
 
-            </div>
+      <div class="fightHud glass">
 
+        <div class="hpBlock">
+          <span>YOU</span>
+          <div class="hpBar">
+            <i id="hpMe"></i>
+          </div>
+          <b id="hpMeText">100</b>
         </div>
+
+        <div class="roundInfo">
+          <span id="mapName">MAP</span>
+          <strong id="roundText">ROUND 1</strong>
+        </div>
+
+        <div class="hpBlock enemy">
+          <span id="hpEnemyLabel">ENEMY</span>
+          <div class="hpBar">
+            <i id="hpEnemy"></i>
+          </div>
+          <b id="hpEnemyText">100</b>
+        </div>
+
+      </div>
+
+      <canvas id="arena" width="1400" height="700"></canvas>
+
+      <div class="crosshair">+</div>
+
+      <button id="fireButton" class="fireButton">FIRE</button>
 
     </div>
 
-    <script src="/socket.io/socket.io.js"></script>
-    <script src="script.js"></script>
+  </div>
+</section>
+
+<div id="duelInvite" class="modal hidden">
+  <div class="modalCard glass">
+    <div class="duelIcon">⚡</div>
+    <h2>1V1 CHALLENGE</h2>
+    <p id="inviteText"></p>
+
+    <div class="modalButtons">
+      <button id="declineInvite" class="secondary">ABLEHNEN</button>
+      <button id="acceptInvite" class="primary">ANNEHMEN</button>
+    </div>
+  </div>
+</div>
+
+<div id="matchModal" class="modal hidden">
+  <div class="modalCard glass">
+    <div class="duelIcon">🏆</div>
+    <h2 id="matchTitle">MATCH ENDE</h2>
+    <p id="matchText"></p>
+
+    <div class="modalButtons">
+      <button id="backLobby" class="secondary">LOBBY</button>
+      <button id="continueMatch" class="primary">NOCH 3 RUNDEN</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="script.js"></script>
 
 </body>
 </html>
