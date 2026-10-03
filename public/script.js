@@ -1080,7 +1080,7 @@ socket.on("error", message => {
 ========================= */
 
 console.log("LHX Neon Arena controls loaded.");
-const skinButton = document.getElementById("skinBtn");
+const skinButton = document.getElementById("changeSkin");
 
 if (skinButton) {
   skinButton.addEventListener("click", () => {
