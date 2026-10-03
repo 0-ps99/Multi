@@ -132,7 +132,7 @@ function sound(type) {
    LOGIN
 ========================= */
 
-const joinButton = $("joinBtn");
+const joinButton = $("startButton");
 const nameInput = $("nameInput");
 
 if (joinButton) {
