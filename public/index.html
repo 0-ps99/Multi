@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LHX Multiplayer</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <div id="login">
+        <div class="card">
+            <div class="logo">LHX</div>
+
+            <h1>Online Lobby</h1>
+
+            <p>
+                Triff dich mit anderen Spielern online.
+            </p>
+
+            <input
+                id="nameInput"
+                maxlength="18"
+                placeholder="Dein Name"
+                autocomplete="off"
+            >
+
+            <button id="joinButton">
+                Lobby betreten
+            </button>
+
+            <div id="loginError"></div>
+        </div>
+    </div>
+
+    <div id="game" class="hidden">
+
+        <header>
+            <strong>LHX</strong>
+
+            <div>
+                🟢 <span id="playerCount">0</span> online
+            </div>
+        </header>
+
+        <div class="game">
+
+            <div class="world">
+                <canvas
+                    id="world"
+                    width="1200"
+                    height="700"
+                ></canvas>
+
+                <div id="joystick">
+                    <div id="stick"></div>
+                </div>
+            </div>
+
+            <div class="chat">
+
+                <h3>Lobby Chat</h3>
+
+                <div id="messages"></div>
+
+                <form id="chatForm">
+                    <input
+                        id="chatInput"
+                        maxlength="180"
+                        placeholder="Nachricht..."
+                        autocomplete="off"
+                    >
+
+                    <button>Senden</button>
+                </form>
+
+            </div>
+
+        </div>
+
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="script.js"></script>
+
+</body>
+</html>
